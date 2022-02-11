@@ -10,6 +10,7 @@ import wandb
 from torch import optim
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
+from kornia.filters import spatial_gradient, sobel
 
 from utils.data_loading import BasicDataset, TorsoDataset #  CarvanaDataset
 from utils.dice_score import dice_loss
@@ -69,7 +70,7 @@ def train_net(net,
 
     # 4. Set up the optimizer, the loss, the learning rate scheduler and the loss scaling for AMP
     optimizer = optim.RMSprop(net.parameters(), lr=learning_rate, weight_decay=1e-8, momentum=0.9)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=2)  # goal: maximize Dice score
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=7)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
     criterion = nn.MSELoss()
     global_step = 0
@@ -95,7 +96,11 @@ def train_net(net,
                 true_masks = 1-1/(true_masks+1) #Transform values to a 0 to 1 value
                 with torch.cuda.amp.autocast(enabled=amp):
                     masks_pred = net(images)
-                    loss = criterion(masks_pred, true_masks) 
+                    distance_loss = torch.sqrt(criterion(masks_pred, true_masks))
+                    d_true = sobel(true_masks)
+                    d_pred = sobel(masks_pred)
+                    img_grad_loss = torch.mean(torch.abs(d_pred - d_true))
+                    loss = 0.5*distance_loss + 0.5*img_grad_loss
                 optimizer.zero_grad(set_to_none=True)
                 grad_scaler.scale(loss).backward()
                 grad_scaler.step(optimizer)
