@@ -42,6 +42,11 @@ class BasicDataset(Dataset):
 
         if not is_mask:
             img_ndarray = img_ndarray / 255
+            
+            #Fixed c=4 problem
+            c, w, h = img_ndarray.shape
+            if c == 4:
+                img_ndarray = img_ndarray[:3,:,:]
 
         return img_ndarray
 
@@ -70,10 +75,6 @@ class BasicDataset(Dataset):
         img = self.preprocess(img, self.scale, is_mask=False)
         mask = self.preprocess(mask, self.scale, is_mask=True) #war vorher auf True
 
-        #Fixed c=4 problem
-        c, w, h = img.shape
-        if c == 4:
-            img = img[:3,:,:]
         return {
             'image': torch.as_tensor(img.copy()).float().contiguous(),
             'mask': torch.as_tensor(mask.copy()).float().contiguous()
