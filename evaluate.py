@@ -20,10 +20,9 @@ def evaluate(net, dataloader, device):
         with torch.no_grad():
             # predict the mask
             mask_pred = net(image)
-            mask_pred = 1/(1-1/(mask_pred+1)) 
+            mask_pred = -1/(1-(1/mask_pred)) 
             err = torch.abs(mask_true-mask_pred)
-            a,b,c,d = err.size()
-            dice_score = torch.sum(err).cpu()/(a*b*c*d)
+            dice_score = -torch.mean(err).cpu()
             
     net.train()
 
