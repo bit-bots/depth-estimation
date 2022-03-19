@@ -7,10 +7,7 @@ from utils.dice_score import multiclass_dice_coeff, dice_coeff
 
 def evaluate(net, dataloader, device, progressbar=True):
     net.eval()
-    if progressbar:
-        num_val_batches = len(dataloader)
-    else:
-        num_val_batches = 0
+    num_val_batches = len(dataloader)
     dice_score = 0
 
     # iterate over the validation set
