@@ -52,6 +52,7 @@ def train_net(net,
     loader_args = dict(batch_size=batch_size, num_workers=16, pin_memory=True)
     train_loader = DataLoader(train_set, shuffle=True, **loader_args)
     val_loader = DataLoader(val_set, shuffle=False, drop_last=False, **loader_args)
+    num_val_batches = len(val_loader)
 
     # (Initialize logging when not using optuna)
     if trial is None:
@@ -125,8 +126,8 @@ def train_net(net,
                 division_step = (n_train // (200 * batch_size))
                 if division_step > 0 and global_step % division_step == 0:
 
-                    val_score = evaluate(net, val_loader, device, progressbar=progressbar)
 
+                    val_score = evaluate(net, val_loader, device, progressbar=progressbar, dataloader_len=num_val_batches)
                     scheduler.step()
                     if trial:
                         trial.report(val_score, (global_step // division_step)-1)
