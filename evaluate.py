@@ -22,7 +22,7 @@ def evaluate(net, dataloader, device, progressbar=True):
             mask_pred = net(image)
             mask_pred = -1/(1-(1/mask_pred)) 
             err = torch.abs(mask_true-mask_pred)
-            dice_score = -torch.mean(err).cpu()
+            dice_score += -torch.mean(err).cpu()
             
     net.train()
 
