@@ -123,9 +123,8 @@ def train_net(net,
                     })
 
                 # Evaluation round
-                division_step = (n_train // (200 * batch_size))
-                if division_step > 0 and global_step % division_step == 0:
-
+                division_step = n_train // (batch_size * 4)
+                if global_step  % division_step == 0:
 
                     val_score = evaluate(net, val_loader, device, progressbar=progressbar, dataloader_len=num_val_batches)
                     scheduler.step()
