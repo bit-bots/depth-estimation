@@ -191,6 +191,7 @@ def run_trial(trial, args):
     net.to(device=device)
     return train_net(
         net=net,
+        trainpath=args.train_path,
         epochs=args.epochs,
         batch_size=batch_size,
         learning_rate=learning_rate,
@@ -274,6 +275,7 @@ if __name__ == '__main__':
         net.to(device=device)
         try:
             train_net(net=net,
+                      trainpath=args.train_path,
                       epochs=args.epochs,
                       batch_size=args.batch_size,
                       learning_rate=args.lr,
