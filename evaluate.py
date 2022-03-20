@@ -5,9 +5,12 @@ from tqdm import tqdm
 from utils.dice_score import multiclass_dice_coeff, dice_coeff
 
 
-def evaluate(net, dataloader, device, progressbar=True):
+def evaluate(net, dataloader, device, progressbar=True, dataloader_len=None):
     net.eval()
-    num_val_batches = len(dataloader)
+    if dataloader_len is None:
+        num_val_batches = len(dataloader)
+    else:
+        num_val_batches = dataloader_len
     dice_score = 0
 
     # iterate over the validation set
