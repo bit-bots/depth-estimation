@@ -17,7 +17,6 @@ from utils.dice_score import dice_loss
 from evaluate import evaluate
 from unet import UNet
 
-dir_train_mask = Path('/srv/ssd_nvm/TORSO_21_dataset/data/simulation/train/depth/')
 dir_checkpoint = Path('./checkpoints/')
 
 WANDB = True
@@ -31,12 +30,13 @@ def train_net(net,
               save_checkpoint: bool = True,
               img_scale: float = 0.1,
               amp: bool = False,
-              weight_decay=1e-8,
+              weight_decay=1e-12,
               momentum=0.9,
-              sched_gamma=0.1,
+              sched_gamma=0.16,
               progressbar=True,
               validation_split=1/6,
               loss_weighting=0.5,
+              sparse_labels=False,
               trial=None):
     # 1. Create dataset
 
@@ -88,8 +88,6 @@ def train_net(net,
             for batch in train_loader:
                 images = batch['image']
                 true_masks = batch['mask']
-                # print(images.shape)
-                # print(true_masks.shape)
                 assert images.shape[1] == net.n_channels, \
                     f'Network has been defined with {net.n_channels} input channels, ' \
                     f'but loaded images have {images.shape[1]} channels. Please check that ' \
@@ -101,11 +99,16 @@ def train_net(net,
                 true_masks = 1-1/(true_masks+1) #Transform values to a 0 to 1 value
                 with torch.cuda.amp.autocast(enabled=amp):
                     masks_pred = net(images)
-                    distance_loss = torch.sqrt(criterion(masks_pred, true_masks))
-                    d_true = sobel(true_masks)
-                    d_pred = sobel(masks_pred)
-                    img_grad_loss = torch.mean(torch.abs(d_pred - d_true))
-                    loss = loss_weighting*distance_loss + (1-loss_weighting)*img_grad_loss
+
+                    # Check if we have spase labels and only want to backprop non zero values with an MSE loss
+                    if sparse_labels:
+                        loss = (torch.pow(true_masks - masks_pred, 2) * true_masks.bool().int().float().clamp(min=0.001, max=1.0)).sum() / true_masks.bool().sum()
+                    else:
+                        distance_loss = torch.pow(true_masks - masks_pred, 2).mean()
+                        d_true = sobel(true_masks)
+                        d_pred = sobel(masks_pred)
+                        img_grad_loss = torch.mean(torch.abs(d_pred - d_true))
+                        loss = loss_weighting * distance_loss + (1 - loss_weighting) * img_grad_loss
                 optimizer.zero_grad(set_to_none=True)
                 grad_scaler.scale(loss).backward()
                 grad_scaler.step(optimizer)
@@ -204,12 +207,13 @@ def run_trial(trial, args):
         weight_decay=weight_decay,
         momentum=momentum,
         progressbar=False,
+        sparse_labels=args.spare_labels,
         trial=trial)
 
 def get_args():
     parser = argparse.ArgumentParser(description='Train the UNet on images and target masks')
     parser.add_argument('--epochs', '-e', metavar='E', type=int, default=5, help='Number of epochs')
-    parser.add_argument('--batch-size', '-b', dest='batch_size', metavar='B', type=int, default=1, help='Batch size')
+    parser.add_argument('--batch-size', '-b', dest='batch_size', metavar='4', type=int, default=1, help='Batch size')
     parser.add_argument('--learning-rate', '-l', metavar='LR', type=float, default=0.00001,
                         help='Learning rate', dest='lr')
     parser.add_argument('--load', '-f', type=str, default=False, help='Load model from a .pth file')
@@ -217,11 +221,12 @@ def get_args():
     parser.add_argument('--amp', action='store_true', default=True, help='Use mixed precision')
     parser.add_argument('--gpu', type=str, default='0', help='Specify gpu device')
     parser.add_argument('--optuna', '-o', action='store_true', default=False, help='Use optuna optimization')
-    parser.add_argument('--study_name', type=str, default='depth-unet-0', help='Name of the optuna study')
-    parser.add_argument('--study_storage', type=str, default='', help='Storage of the optuna study')
-    parser.add_argument('--train_path', type=str, help='Path to the training data')
-
-
+    parser.add_argument('--study-name', type=str, default='depth-unet-0', help='Name of the optuna study')
+    parser.add_argument('--study-storage', type=str, default='', help='Storage of the optuna study')
+    parser.add_argument('--train-path', type=str, help='Path to the training data')
+    parser.add_argument('--sparse-labels', '-sl', action='store_true', default=False, \
+        help='Enables training with sparse labels that contain no information for certain regions. \
+        The unknown regions are defined by the 0.0 value.')
     return parser.parse_args()
 
 
@@ -281,7 +286,8 @@ if __name__ == '__main__':
                       learning_rate=args.lr,
                       device=device,
                       img_scale=args.scale,
-                      amp=args.amp)
+                      amp=args.amp,
+                      sparse_labels=args.sparse_labels)
         except KeyboardInterrupt:
             torch.save(net.state_dict(), 'INTERRUPTED.pth')
             logging.info('Saved interrupt')
