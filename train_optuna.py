@@ -15,7 +15,7 @@ from kornia.filters import spatial_gradient, sobel
 from utils.data_loading import BasicDataset, TorsoDataset #  CarvanaDataset
 from utils.dice_score import dice_loss
 from evaluate import evaluate
-from unet import UNet
+from unet import UNet, FastDepth
 
 dir_checkpoint = Path('./checkpoints/')
 
@@ -28,7 +28,6 @@ def train_net(net,
               batch_size: int = 1,
               learning_rate: float = 0.001,
               save_checkpoint: bool = True,
-              img_scale: float = 0.1,
               amp: bool = False,
               weight_decay=1e-12,
               momentum=0.9,
@@ -41,7 +40,7 @@ def train_net(net,
     # 1. Create dataset
 
     #made new dataset, comment is the old version
-    dataset = TorsoDataset(Path(trainpath) / Path('images'), Path(trainpath) / Path('depth'), img_scale)
+    dataset = TorsoDataset(Path(trainpath) / Path('images'), Path(trainpath) / Path('depth'))
 
     # 2. Split into train / validation partitions
     n_val = int(round(len(dataset) * validation_split))
@@ -56,9 +55,10 @@ def train_net(net,
 
     # (Initialize logging when not using optuna)
     if trial is None:
-        experiment = wandb.init(project='U-Net', resume='allow', anonymous='must')
+        #experiment = wandb.init(project='U-Net', resume='allow', anonymous='must')
+        experiment = wandb.init(project='depth-u-net-paper', resume='allow', entity="bitbots")
         experiment.config.update(dict(epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
-                                      save_checkpoint=save_checkpoint, img_scale=img_scale, amp=amp))
+                                      save_checkpoint=save_checkpoint, amp=amp))
 
     logging.info(f'''Starting training:
         Epochs:          {epochs}
@@ -68,7 +68,6 @@ def train_net(net,
         Validation size: {n_val}
         Checkpoints:     {save_checkpoint}
         Device:          {device.type}
-        Images scaling:  {img_scale}
         Mixed Precision: {amp}
     ''')
 
@@ -199,7 +198,6 @@ def run_trial(trial, args):
         batch_size=batch_size,
         learning_rate=learning_rate,
         device=device,
-        img_scale=args.scale,
         amp=args.amp,
         save_checkpoint=False,
         sched_gamma=sched_gamma,
@@ -217,7 +215,6 @@ def get_args():
     parser.add_argument('--learning-rate', '-l', metavar='LR', type=float, default=0.00001,
                         help='Learning rate', dest='lr')
     parser.add_argument('--load', '-f', type=str, default=False, help='Load model from a .pth file')
-    parser.add_argument('--scale', '-s', type=float, default=0.1, help='Downscaling factor of the images')
     parser.add_argument('--amp', action='store_true', default=True, help='Use mixed precision')
     parser.add_argument('--gpu', type=str, default='0', help='Specify gpu device')
     parser.add_argument('--optuna', '-o', action='store_true', default=False, help='Use optuna optimization')
@@ -267,10 +264,10 @@ if __name__ == '__main__':
         # Change here to adapt to your data
         # n_channels=3 for RGB images
         # n_classes is the number of probabilities you want to get per pixel
+        #net = FastDepth()
         net = UNet(n_channels=3, bilinear=True)
 
         logging.info(f'Network:\n'
-                     f'\t{net.n_channels} input channels\n'
                      f'\t{"Bilinear" if net.bilinear else "Transposed conv"} upscaling')
 
         if args.load:
@@ -285,7 +282,6 @@ if __name__ == '__main__':
                       batch_size=args.batch_size,
                       learning_rate=args.lr,
                       device=device,
-                      img_scale=args.scale,
                       amp=args.amp,
                       sparse_labels=args.sparse_labels)
         except KeyboardInterrupt:
