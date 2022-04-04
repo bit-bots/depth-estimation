@@ -151,7 +151,7 @@ class FastDepth(nn.Module):
         # Decoder
         for i, layer in enumerate(self.decoder_model[:-1]):
             x = layer(x)
-            x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=True)
+            x = F.interpolate(x, scale_factor=2, mode='nearest')
             if i==3:
                 x = x + x1
             elif i==2:
