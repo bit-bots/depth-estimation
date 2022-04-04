@@ -30,11 +30,10 @@ def train_net(net,
               save_checkpoint: bool = True,
               amp: bool = False,
               weight_decay=1e-12,
-              momentum=0.9,
               sched_gamma=0.16,
               progressbar=True,
               validation_split=1/6,
-              loss_weighting=0.5,
+              loss_weighting=0.9,
               sparse_labels=False,
               trial=None):
     # 1. Create dataset
@@ -72,7 +71,7 @@ def train_net(net,
     ''')
 
     # 4. Set up the optimizer, the loss, the learning rate scheduler and the loss scaling for AMP
-    optimizer = optim.RMSprop(net.parameters(), lr=learning_rate, weight_decay=weight_decay, momentum=momentum)
+    optimizer = optim.Adam(net.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 20, gamma=sched_gamma)
     # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=7)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
@@ -101,9 +100,9 @@ def train_net(net,
 
                     # Check if we have spase labels and only want to backprop non zero values with an MSE loss
                     if sparse_labels:
-                        loss = (torch.pow(true_masks - masks_pred, 2) * true_masks.bool().int().float().clamp(min=0.001, max=1.0)).sum() / true_masks.bool().sum()
+                        loss = (torch.abs(true_masks - masks_pred) * true_masks.bool().int().float().clamp(min=0.001, max=1.0)).sum() / true_masks.bool().sum()
                     else:
-                        distance_loss = torch.pow(true_masks - masks_pred, 2).mean()
+                        distance_loss = torch.abs(true_masks - masks_pred).mean()
                         d_true = sobel(true_masks)
                         d_pred = sobel(masks_pred)
                         img_grad_loss = torch.mean(torch.abs(d_pred - d_true))
@@ -142,14 +141,16 @@ def train_net(net,
                             histograms['Weights/' + tag] = wandb.Histogram(value.data.cpu())
                             histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
                         logging.info('Validation score: {}'.format(val_score))
+
                         experiment.log({
                             'learning rate': optimizer.param_groups[0]['lr'],
                             'validation': val_score,
-                            'images': wandb.Image(images[0].cpu()),
-                            'masks': {
-                                'true': wandb.Image(true_masks[0].float().cpu()),
-                                'pred': wandb.Image(masks_pred[0].float().cpu()),
-                            },
+                            'image_samples': wandb.Image(
+                                torch.cat((
+                                    images[0].cpu(), 
+                                    (true_masks[0].float().cpu()).repeat(3, 1, 1), 
+                                    (masks_pred[0].float().cpu()).clamp(min=0, max=1.0).repeat(3, 1, 1)
+                                ), 2)),
                             'step': global_step,
                             'epoch': epoch,
                             **histograms
@@ -170,12 +171,9 @@ def run_trial(trial, args):
     bilinear = trial.suggest_categorical('bilinear', [True, False])
     sched_gamma = trial.suggest_float('sched_gamma', 0, 0.2, step=0.02)
     loss_weighting = trial.suggest_float('loss_weighting', 0, 1, step=0.1)
-    momentum = trial.suggest_float('momentum', 0.8, 0.99, step=0.01)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    # Change here to adapt to your data
-    # n_channels=3 for RGB images
-
+    
     print("  Params: ")
     for key, value in trial.params.items():
         print("    {}: {}".format(key, value))
@@ -203,7 +201,6 @@ def run_trial(trial, args):
         sched_gamma=sched_gamma,
         loss_weighting=loss_weighting,
         weight_decay=weight_decay,
-        momentum=momentum,
         progressbar=False,
         sparse_labels=args.spare_labels,
         trial=trial)
@@ -264,8 +261,8 @@ if __name__ == '__main__':
         # Change here to adapt to your data
         # n_channels=3 for RGB images
         # n_classes is the number of probabilities you want to get per pixel
-        #net = FastDepth()
-        net = UNet(n_channels=3, bilinear=True)
+        net = FastDepth()
+        #net = UNet(n_channels=3, bilinear=True)
 
         logging.info(f'Network:\n'
                      f'\t{"Bilinear" if net.bilinear else "Transposed conv"} upscaling')
