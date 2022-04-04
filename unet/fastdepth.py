@@ -128,10 +128,10 @@ class FastDepth(nn.Module):
             nn.Sequential(
                 depthwise(64, kernel_size),
                 pointwise(64, 32)),
-            pointwise(32, 1))
+            nn.Conv2d(32,1,1,1,0))
 
-        for e in self.decoder_model.children():
-            weights_init(e)
+        #for e in self.decoder_model.children():
+        #    weights_init(e)
 
     def forward(self, x):
         # skip connections: dec4: enc1
@@ -158,5 +158,7 @@ class FastDepth(nn.Module):
                 x = x + x2
             elif i==1:
                 x = x + x3
+        
         x = self.decoder_model[-1](x)
+
         return x
