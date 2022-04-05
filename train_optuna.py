@@ -3,16 +3,19 @@ import logging
 import sys
 from pathlib import Path
 
+import cv2
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import wandb
+import numpy as np
 from torch import optim
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 from kornia.filters import spatial_gradient, sobel
 
 from utils.data_loading import BasicDataset, TorsoDataset #  CarvanaDataset
+from utils.transforms import combined_transforms
 from utils.dice_score import dice_loss
 from evaluate import evaluate
 from unet import UNet, FastDepth
@@ -37,9 +40,7 @@ def train_net(net,
               sparse_labels=False,
               trial=None):
     # 1. Create dataset
-
-    #made new dataset, comment is the old version
-    dataset = TorsoDataset(Path(trainpath) / Path('images'), Path(trainpath) / Path('depth'))
+    dataset = TorsoDataset(Path(trainpath) / Path('images'), Path(trainpath) / Path('depth'), transform=combined_transforms)
 
     # 2. Split into train / validation partitions
     n_val = int(round(len(dataset) * validation_split))
@@ -47,13 +48,13 @@ def train_net(net,
     train_set, val_set = random_split(dataset, [n_train, n_val], generator=torch.Generator().manual_seed(0))
 
     # 3. Create data loaders
-    loader_args = dict(batch_size=batch_size, num_workers=16, pin_memory=True)
+    loader_args = dict(batch_size=batch_size, num_workers=24, pin_memory=True)
     train_loader = DataLoader(train_set, shuffle=True, **loader_args)
     val_loader = DataLoader(val_set, shuffle=False, drop_last=False, **loader_args)
     num_val_batches = len(val_loader)
 
     # (Initialize logging when not using optuna)
-    if trial is None:
+    if trial is None and WANDB:
         #experiment = wandb.init(project='U-Net', resume='allow', anonymous='must')
         experiment = wandb.init(project='depth-u-net-paper', resume='allow', entity="bitbots")
         experiment.config.update(dict(epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
@@ -85,22 +86,22 @@ def train_net(net,
         with tqdm(total=n_train, desc=f'Epoch {epoch + 1}/{epochs}', unit='img', disable=not progressbar) as pbar:
             for batch in train_loader:
                 images = batch['image']
-                true_masks = batch['mask']
+                true_masks = batch['depth']
                 assert images.shape[1] == net.n_channels, \
                     f'Network has been defined with {net.n_channels} input channels, ' \
                     f'but loaded images have {images.shape[1]} channels. Please check that ' \
                     'the images are loaded correctly.'
 
 
-                images = images.to(device=device, dtype=torch.float32)
-                true_masks = true_masks.to(device=device, dtype=torch.float32) #dtype=torch.long
+                images = images.to(device=device, dtype=torch.float32) / 255
+                true_masks = true_masks.to(device=device, dtype=torch.float32)
                 true_masks = 1-1/(true_masks+1) #Transform values to a 0 to 1 value
                 with torch.cuda.amp.autocast(enabled=amp):
                     masks_pred = net(images)
 
                     # Check if we have spase labels and only want to backprop non zero values with an MSE loss
                     if sparse_labels:
-                        loss = (torch.abs(true_masks - masks_pred) * true_masks.bool().int().float().clamp(min=0.001, max=1.0)).sum() / true_masks.bool().sum()
+                        loss = (torch.pow(true_masks - masks_pred, 2) * true_masks.bool().int().float().clamp(min=0.0, max=1.0)).sum() / true_masks.bool().sum()
                     else:
                         distance_loss = torch.abs(true_masks - masks_pred).mean()
                         d_true = sobel(true_masks)
@@ -116,7 +117,7 @@ def train_net(net,
                 global_step += 1
                 epoch_loss += loss.item()
                 pbar.set_postfix(**{'loss (batch)': loss.item()})
-                if trial is None:
+                if trial is None and WANDB:
                     experiment.log({
                         'train loss': loss.item(),
                         'step': global_step,
@@ -127,14 +128,14 @@ def train_net(net,
                 division_step = n_train // (batch_size * 4)
                 if global_step  % division_step == 0:
 
-                    val_score = evaluate(net, val_loader, device, progressbar=progressbar, dataloader_len=num_val_batches)
+                    val_score, rmse, rel, log10, delta_list = evaluate(net, val_loader, device, progressbar=progressbar, dataloader_len=num_val_batches)
                     scheduler.step()
                     if trial:
                         trial.report(val_score, (global_step // division_step)-1)
                         # Handle pruning based on the intermediate value.
                         if trial.should_prune():
                             raise optuna.exceptions.TrialPruned()
-                    else:
+                    elif WANDB:
                         histograms = {}
                         for tag, value in net.named_parameters():
                             tag = tag.replace('/', '.')
@@ -145,12 +146,18 @@ def train_net(net,
                         experiment.log({
                             'learning rate': optimizer.param_groups[0]['lr'],
                             'validation': val_score,
+                            'rmse': rmse,
+                            'rel': rel,
+                            'log10': log10,
+                            'delta_1': delta_list[0],
+                            'delta_2': delta_list[1],
+                            'delta_3': delta_list[2],
                             'image_samples': wandb.Image(
-                                torch.cat((
-                                    images[0].cpu(), 
-                                    (true_masks[0].float().cpu()).repeat(3, 1, 1), 
-                                    (masks_pred[0].float().cpu()).clamp(min=0, max=1.0).repeat(3, 1, 1)
-                                ), 2)),
+                                np.concatenate((
+                                    (images[0].cpu().detach().numpy() * 255).transpose(1,2,0).astype(np.uint8), 
+                                    cv2.applyColorMap((true_masks[0].float().cpu().detach().numpy().transpose(1,2,0) * 255).astype(np.uint8), cv2.COLORMAP_JET), 
+                                    cv2.applyColorMap((masks_pred[0].float().cpu().detach().numpy().transpose(1,2,0) * 255).astype(np.uint8), cv2.COLORMAP_JET)
+                                ), axis=1)),
                             'step': global_step,
                             'epoch': epoch,
                             **histograms
