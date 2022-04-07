@@ -171,6 +171,26 @@ def train_net(net,
 
     return val_score
 
+
+def get_model(model_name, device, weights_file=None):
+    model_name = model_name.lower()
+
+    if model_name == "unet":
+        model = UNet(n_channels=3, bilinear=True)
+    elif model_name == "fastdepth":
+        model = FastDepth()
+    else:
+        print("Unknown model type")
+
+    if weights_file:
+        model.load_state_dict(torch.load(weights_file, map_location=device))
+        logging.info(f'Model loaded from {weights_file}')
+
+    model.to(device=device)
+
+    return model
+ 
+
 def run_trial(trial, args):
 
     learning_rate = trial.suggest_loguniform('learning_rate', 1e-7, 1e-2)
@@ -186,19 +206,8 @@ def run_trial(trial, args):
     for key, value in trial.params.items():
         print("    {}: {}".format(key, value))
 
-    net = UNet(n_channels=3, bilinear=bilinear)
-
-    logging.info(f'Network:\n'
-                 f'\t{net.n_channels} input channels\n'
-                 f'\t{"Bilinear" if net.bilinear else "Transposed conv"} upscaling')
-
-    if args.load:
-        net.load_state_dict(torch.load(args.load, map_location=device))
-        logging.info(f'Model loaded from {args.load}')
-
-    net.to(device=device)
     return train_net(
-        net=net,
+        net=get_model(args.model, device, args.load),
         trainpath=args.train_path,
         epochs=args.epochs,
         batch_size=batch_size,
@@ -216,9 +225,10 @@ def run_trial(trial, args):
 def get_args():
     parser = argparse.ArgumentParser(description='Train the UNet on images and target masks')
     parser.add_argument('--epochs', '-e', metavar='E', type=int, default=5, help='Number of epochs')
-    parser.add_argument('--batch-size', '-b', dest='batch_size', metavar='4', type=int, default=1, help='Batch size')
+    parser.add_argument('--batch-size', '-b', type=int, default=1, help='Batch size')
     parser.add_argument('--learning-rate', '-l', metavar='LR', type=float, default=0.00001,
                         help='Learning rate', dest='lr')
+    parser.add_argument('--model', '-m', type=str, default='UNet', help='Name of the model architecture')
     parser.add_argument('--load', '-f', type=str, default=False, help='Load model from a .pth file')
     parser.add_argument('--amp', action='store_true', default=True, help='Use mixed precision')
     parser.add_argument('--optuna', '-o', action='store_true', default=False, help='Use optuna optimization')
@@ -265,20 +275,7 @@ if __name__ == '__main__':
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         logging.info(f'Using device {device}')
 
-        # Change here to adapt to your data
-        # n_channels=3 for RGB images
-        # n_classes is the number of probabilities you want to get per pixel
-        net = FastDepth()
-        #net = UNet(n_channels=3, bilinear=True)
-
-        logging.info(f'Network:\n'
-                     f'\t{"Bilinear" if net.bilinear else "Transposed conv"} upscaling')
-
-        if args.load:
-            net.load_state_dict(torch.load(args.load, map_location=device))
-            logging.info(f'Model loaded from {args.load}')
-
-        net.to(device=device)
+        net = get_model(args.model, device, args.load)
         try:
             train_net(net=net,
                       trainpath=args.train_path,
