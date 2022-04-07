@@ -24,6 +24,7 @@ dir_checkpoint = Path('./checkpoints/')
 
 WANDB = True
 
+
 def train_net(net,
               device,
               trainpath,
@@ -220,7 +221,6 @@ def get_args():
                         help='Learning rate', dest='lr')
     parser.add_argument('--load', '-f', type=str, default=False, help='Load model from a .pth file')
     parser.add_argument('--amp', action='store_true', default=True, help='Use mixed precision')
-    parser.add_argument('--gpu', type=str, default='0', help='Specify gpu device')
     parser.add_argument('--optuna', '-o', action='store_true', default=False, help='Use optuna optimization')
     parser.add_argument('--study-name', type=str, default='depth-unet-0', help='Name of the optuna study')
     parser.add_argument('--study-storage', type=str, default='', help='Storage of the optuna study')
