@@ -6,3 +6,6 @@ torchvision
 tqdm
 wandb
 kornia
+albumentations
+opencv-python
+optuna

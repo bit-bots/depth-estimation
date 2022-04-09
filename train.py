@@ -218,8 +218,8 @@ def run_trial(trial, args):
         sched_gamma=sched_gamma,
         loss_weighting=loss_weighting,
         weight_decay=weight_decay,
-        progressbar=False,
-        sparse_labels=args.spare_labels,
+        progressbar=True,
+        sparse_labels=args.sparse_labels,
         trial=trial)
 
 def get_args():
