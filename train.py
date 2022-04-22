@@ -196,9 +196,12 @@ def run_trial(trial, args):
     learning_rate = trial.suggest_loguniform('learning_rate', 1e-7, 1e-2)
     weight_decay = trial.suggest_loguniform('weight_decay', 1e-12, 1e-6)
     batch_size = trial.suggest_categorical('batch_size', [4, 8, 16, 32])
-    bilinear = trial.suggest_categorical('bilinear', [True, False])
+    # bilinear = trial.suggest_categorical('bilinear', [True, False])
     sched_gamma = trial.suggest_float('sched_gamma', 0, 0.2, step=0.02)
-    loss_weighting = trial.suggest_float('loss_weighting', 0, 1, step=0.1)
+    if args.sparse_labels:
+        loss_weighting = 1
+    else:
+        loss_weighting = trial.suggest_float('loss_weighting', 0, 1, step=0.1)
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
